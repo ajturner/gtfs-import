@@ -148,7 +148,7 @@ class GTFSImport
     r_create_kml = Concurrent::dataflow do
       puts "Generating KML"
       FileUtils.cp(file, "#{dir}/gtfs.zip")
-      system "./transitfeed/kmlwriter.py #{dir}/gtfs.zip #{dir}/gtfs.kml >/dev/null"
+      system "#{File.dirname(__FILE__)}/transitfeed/kmlwriter.py #{dir}/gtfs.zip #{dir}/gtfs.kml >/dev/null"
     end
 
     r_create = Concurrent::dataflow(r_create_kml) do |_|
@@ -189,4 +189,5 @@ class GTFSImport
 
 end
 
-GTFSImport.import(YAML.load("config.yml"))
+config = YAML.load(File.read("#{File.dirname(__FILE__)}/config.yml"))
+GTFSImport.import(config)
