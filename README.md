@@ -18,3 +18,7 @@ group for you.
 
 After that, simply run it from the command line! It should take less than a
 minute to run.
+
+## Transit Feed
+This uses the https://github.com/google/transitfeed library for KML generation,
+so a big thank you to Google for providing it!

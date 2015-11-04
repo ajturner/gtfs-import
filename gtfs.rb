@@ -13,30 +13,21 @@
 # The following gems are required: zip, concurrent, arcgis-ruby.
 #
 # Usage:
-# The Config module contains all of the parts you need to change. Note that you
-# can leave GROUP_ID as nil if you want the script to automatically create a
-# group for you.
+# Copy the config.example.yml to config.yml and fill in the correct details for
+# your use case.
 #
 # After that, simply run it from the command line! It should take less than a
-# minute to run.
+# minute to run, depending on data size and connection speed.
 #
 
+require 'yaml'
 require 'rubygems'
 require 'zip'
 require 'concurrent'
 require 'arcgis-ruby'
+require 'pry'
 
 
-module Config
-  HOST = "https://www.arcgis.com/sharing/rest"
-  USERNAME = "myusername"
-  PASSWORD = "mypassword"
-  GROUP_ID = nil
-  FILE = File.open("/path/to/gtfs/file.zip")
-end
-
-
-# Reference: 
 class GTFSImport
   # Define the list of files that comprise a GTFS zip
   REQUIRED_FILES = [
@@ -55,28 +46,21 @@ class GTFSImport
     "shapes.txt",
     "frequencies.txt",
     "transfers.txt",
-    "feed_info.txt"
+    "feed_info.txt",
+    "stops.txt"
   ]
-
-  PUBLISH_STEP_ACTIONS = {
-    "stops.txt" => {
-      "name" => "Stops",
-      "locationType" => "coordinates",
-      "latitudeFieldName" => "stop_lat",
-      "longitudeFieldName" => "stop_lon"
-    },
-  }
 
 
   #
   # Kick off the import process--a group may optionally be passed in to receive
   # the files, otherwise one will be created with the name "GTFS Import"
   #
-  def self.import
+  def self.import(config)
     dir = Dir.mktmpdir
 
     begin
-      files = extract_files(zip_file: Config::FILE, dir: dir)
+      # binding.pry
+      files = extract_files(zip_file: config["file"], dir: dir)
 
       valid = (REQUIRED_FILES - files.map{|f| f[:file_name]}).empty?
       raise "Invalid GTFS format. No files were uploaded." unless valid
@@ -87,13 +71,13 @@ class GTFSImport
       # Begin making the appropriate API calls
       # TODO: pull this from config!
       connection = Arcgis::Connection.new(
-        host: Config::HOST,
-        username: Config::USERNAME,
-        password: Config::PASSWORD
+        host: config["host"],
+        username: config["username"],
+        password: config["password"]
       )
 
       # Create a new group if necessary
-      group_id = Config::GROUP_ID || begin
+      group_id = config["group_id"] || begin
         puts "Creating GTFS Group"
         group = connection.group.create(
           title: "GTFS Import",
@@ -105,15 +89,13 @@ class GTFSImport
 
       requests = []
 
-      # Set up ArcGIS requests based on if it's going to be a simple file
-      # upload or something to be published as a feature service.
+      # Create a kml file for a map using the transitfeed python library
+      requests += kml_item(connection: connection, group_id: group_id, dir: dir, file: config["file"])
+
+      # Set up ArcGIS requests for raw files
       files.each do |item|
         args = {connection: connection, item: item, group_id: group_id}
-        if PUBLISH_STEP_ACTIONS[item[:file_name]]
-          requests += feature_item(args)
-        else
-          requests += simple_item(args)
-        end
+        requests += simple_item(args)
       end
 
       # The created requests are run concurrently. Block on each until they've
@@ -158,47 +140,31 @@ class GTFSImport
 
 
   #
-  # This creates a feature service for stops.txt--there's a chance that we can
-  # extract out shapes.txt at a future time
+  # This creates a kml file based on the GTFS data, courtesy of the transitfeed
+  # library from google. This script should ideally be refactored in Python to
+  # not have to resort to a system call.
   #
-  def self.feature_item(connection:, item:, group_id:)
-    # create
-    r_create = Concurrent::dataflow do
-      puts "Creating #{item[:name]}"
-      connection.user.add_item(title: item[:name], type: "CSV", tags: "gtfs",
-        file: File.open(item[:path]))
+  def self.kml_item(file:, group_id:, connection:, dir:)
+    r_create_kml = Concurrent::dataflow do
+      puts "Generating KML"
+      FileUtils.cp(file, "#{dir}/gtfs.zip")
+      system "./transitfeed/kmlwriter.py #{dir}/gtfs.zip #{dir}/gtfs.kml >/dev/null"
     end
 
-    # analyze
-    r_analyze = Concurrent::dataflow(r_create) do |created_item|
-      puts "Analyzing #{item[:name]}"
-      connection.feature.analyze(itemId: created_item["id"], filetype: "csv")
+    r_create = Concurrent::dataflow(r_create_kml) do |_|
+      puts "Creating KML item"
+      connection.user.add_item(title: "gtfs.kml", type: "KML", tags: "gtfs",
+        file: File.open("#{dir}/gtfs.kml"))
     end
 
-    # publish
-    r_publish = Concurrent::dataflow(r_create, r_analyze) do |created_item, analysis|
-      puts "Publishing #{item[:name]}"
-      params = {
-        filetype: "csv",
-        itemId: created_item["id"],
-        publishParameters: analysis["publishParameters"].merge(
-          PUBLISH_STEP_ACTIONS[item[:file_name]]
-        )
-      }
-
-      connection.user.publish_item(params)
+    r_share = Concurrent::dataflow(r_create) do |created_item|
+      puts "Sharing KML"
+      connection.item(created_item["id"]).share(groups: group_id,
+        everyone: true, org: true)
     end
+    
+    [r_create_kml, r_create, r_share]
 
-    # share
-    r_share = Concurrent::dataflow(r_publish) do |publishing|
-      puts "Sharing #{item[:name]}"
-      service_item_id = publishing["services"].first["serviceItemId"]
-      connection.item(service_item_id).share(
-        groups: group_id, everyone: true, org: true
-      )
-    end
-
-    [r_create, r_analyze, r_publish, r_share]
   end
 
 
@@ -223,4 +189,4 @@ class GTFSImport
 
 end
 
-GTFSImport.import
+GTFSImport.import(YAML.load("config.yml"))

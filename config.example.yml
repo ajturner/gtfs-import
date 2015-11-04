@@ -1,0 +1,5 @@
+host: "https://someaddress.arcgis.com/sharing/rest"
+username: "my_username"
+password: "my_password"
+group_id: "existing group ID or leave line blank (including quotes) to create new group"
+file: "/path/to/gtfs.zip"
