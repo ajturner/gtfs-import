@@ -50,6 +50,14 @@ class GTFSImport
     "stops.txt"
   ]
 
+  PUBLISH_STEP_ACTIONS = {
+    "stops.txt" => {
+      "name" => "Stops",
+      "locationType" => "coordinates",
+      "latitudeFieldName" => "stop_lat",
+      "longitudeFieldName" => "stop_lon"
+    },
+  }
 
   #
   # Kick off the import process--a group may optionally be passed in to receive
@@ -89,15 +97,15 @@ class GTFSImport
 
       requests = []
 
-      # Create a kml file for a map using the transitfeed python library
-      requests += kml_item(connection: connection, group_id: group_id, dir: dir, file: config["file"])
-
       # Set up ArcGIS requests for raw files
       files.each do |item|
         args = {connection: connection, item: item, group_id: group_id}
-        requests += simple_item(args)
+        if PUBLISH_STEP_ACTIONS[item[:file_name]]
+          requests += feature_item(args)
+        else
+          requests += simple_item(args)
+        end
       end
-
       # The created requests are run concurrently. Block on each until they've
       # all been run. If we hit any errors, we'll throw them at the end.
       errors = []
@@ -139,32 +147,44 @@ class GTFSImport
   end
 
 
-  #
-  # This creates a kml file based on the GTFS data, courtesy of the transitfeed
-  # library from google. This script should ideally be refactored in Python to
-  # not have to resort to a system call.
-  #
-  def self.kml_item(file:, group_id:, connection:, dir:)
-    r_create_kml = Concurrent::dataflow do
-      puts "Generating KML"
-      FileUtils.cp(file, "#{dir}/gtfs.zip")
-      system "#{File.dirname(__FILE__)}/transitfeed/kmlwriter.py #{dir}/gtfs.zip #{dir}/gtfs.kml >/dev/null"
+  def self.feature_item(connection:, item:, group_id:)
+    # create
+    r_create = Concurrent::dataflow do
+      puts "Creating #{item[:name]}"
+      connection.user.add_item(title: item[:name], type: "CSV", tags: "gtfs",
+        file: File.open(item[:path]))
     end
 
-    r_create = Concurrent::dataflow(r_create_kml) do |_|
-      puts "Creating KML item"
-      connection.user.add_item(title: "gtfs.kml", type: "KML", tags: "gtfs",
-        file: File.open("#{dir}/gtfs.kml"))
+    # analyze
+    r_analyze = Concurrent::dataflow(r_create) do |created_item|
+      puts "Analyzing #{item[:name]}"
+      connection.feature.analyze(itemId: created_item["id"], filetype: "csv")
     end
 
-    r_share = Concurrent::dataflow(r_create) do |created_item|
-      puts "Sharing KML"
-      connection.item(created_item["id"]).share(groups: group_id,
-        everyone: true, org: true)
-    end
-    
-    [r_create_kml, r_create, r_share]
+    # publish
+    r_publish = Concurrent::dataflow(r_create, r_analyze) do |created_item, analysis|
+      puts "Publishing #{item[:name]}"
+      params = {
+        filetype: "csv",
+        itemId: created_item["id"],
+        publishParameters: analysis["publishParameters"].merge(
+          PUBLISH_STEP_ACTIONS[item[:file_name]]
+        )
+      }
 
+      connection.user.publish_item(params)
+    end
+
+    # share
+    r_share = Concurrent::dataflow(r_publish) do |publishing|
+      puts "Sharing #{item[:name]}"
+      service_item_id = publishing["services"].first["serviceItemId"]
+      connection.item(service_item_id).share(
+        groups: group_id, everyone: true, org: true
+      )
+    end
+
+    [r_create, r_analyze, r_publish, r_share]
   end
 
 
