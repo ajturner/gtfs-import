@@ -1,0 +1,50 @@
+{
+  "name":"Routes",
+  "type":"Feature Layer",
+  "displayField":"",
+  "description":"",
+  "geometryType":"esriGeometryPolyline",
+
+  "drawingInfo":{
+    "renderer":{
+      "type":"uniqueValue",
+      "field1":"shape_id",
+      "defaultSymbol":{
+        "color":[255,0,0,255],
+        "width":3.75,
+        "type":"esriSLS",
+        "style":"esriSLSSolid"
+      },
+      "uniqueValueInfos":{{uniqueValueInfos}}
+    }
+  },
+  "objectIdField":"FID",
+  "fields":[
+    {
+      "name":"FID",
+      "type":"esriFieldTypeOID",
+      "alias":"FID",
+      "sqlType":"sqlTypeOther",
+      "nullable":false,
+      "editable":false,
+      "domain":null,
+      "defaultValue":null
+    },
+    {
+      "name":"shape_id",
+      "type":"esriFieldTypeString",
+      "alias":"Route ID",
+      "sqlType":"sqlTypeNVarchar",
+      "nullable":true,
+      "editable":true,
+      "domain":null,
+      "defaultValue":null,
+      "length":255
+    }
+  ],
+  "types":{{types}},
+  "supportedQueryFormats":"JSON",
+  "hasStaticData":false,
+  "maxRecordCount":20000,
+  "capabilities":"Query,Editing,Create,Update,Delete"
+}

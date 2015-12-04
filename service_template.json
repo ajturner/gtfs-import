@@ -1,0 +1,28 @@
+{
+  "targetType":"featureService",
+  "createParameters":{
+    "maxRecordCount":20000,
+    "supportedQueryFormats":"JSON",
+    "capabilities":"Query,Editing,Create,Update,Delete",
+    "description":"",
+    "allowGeometryUpdates":"true",
+    "units":"esriDecimalDegrees",
+    "syncEnabled":"false",
+    "editorTrackingInfo":{
+      "enableEditorTracking":"false",
+      "enableOwnershipAccessControl":"false",
+      "allowOthersToUpdate":"true",
+      "allowOthersToDelete":"true"
+    },
+    "spatialReference":{ "wkid":4326 },
+    "xssPreventionInfo":{
+      "xssPreventionEnabled":"true",
+      "xssPreventionRule":"InputOnly",
+      "xssInputRule":"rejectInvalid"
+    },
+    "tables":[
+
+    ],
+    "name":"FS_Create"
+  }
+}
