@@ -95,15 +95,15 @@ class GTFSImport
         password: config["password"]
       )
 
-      connection.search(q: "FS_Create")["results"].map do |x|
-        Concurrent::Future.execute{ connection.item(x["id"]).delete rescue nil }
-      end.each{|x| x.value}
+      # connection.search(q: config["service_name"])["results"].map do |x|
+      #   Concurrent::Future.execute{ connection.item(x["id"]).delete rescue nil }
+      # end.each{|x| x.value}
 
-      2.times do
-        connection.search(q: "tags:gtfs")["results"].map do |x|
-          Concurrent::Future.execute{ connection.item(x["id"]).delete rescue nil }
-        end.each{|x| x.value}
-      end
+      # 2.times do
+      #   connection.search(q: "tags:gtfs")["results"].map do |x|
+      #     Concurrent::Future.execute{ connection.item(x["id"]).delete rescue nil }
+      #   end.each{|x| x.value}
+      # end
 
       # Create a new group if necessary
       group_id = config["group_id"] || begin
@@ -118,7 +118,12 @@ class GTFSImport
 
       requests = []
 
-      args = {connection: connection, files: files, group_id: group_id}
+      args = {
+        connection: connection,
+        files: files,
+        group_id: group_id,
+        service_name: config["service_name"]
+      }
       requests += create_service(args)
 
       # Set up ArcGIS requests for raw files
@@ -173,7 +178,7 @@ class GTFSImport
   end
 
 
-  def self.create_service(connection:, files:, group_id:)
+  def self.create_service(connection:, files:, group_id:, service_name:)
     stops_item = files.detect{|f| f[:name] == 'Stops'}
     shapes_item = files.detect{|f| f[:name] == 'Shapes'}
 
@@ -181,8 +186,12 @@ class GTFSImport
     # r_service = Concurrent::dataflow do
     service = begin
       puts "Creating feature service"
-      service_temp = JSON.parse(File.read("#{File.dirname(__FILE__)}/service_template.json"))
-      service = connection.user.create_service(service_temp)
+      service_tmpl = File.read("#{File.dirname(__FILE__)}/service_template.json")
+      service_json_str = service_tmpl.
+        gsub('{{service_name}}', service_name)
+      service_json = JSON.parse(service_json_str)
+
+      service = connection.user.create_service(service_json)
 
       # AGOL chrome
       fs_uri = URI.parse(service["encodedServiceURL"])
@@ -229,8 +238,6 @@ class GTFSImport
           gsub('{{types}}', shape_types.to_json)
 
         shapes_json = JSON.parse(shapes_json_str)
-        # puts [shape_colors(files)].inspect
-        # binding.pry
 
         layers << shapes_json
       end
@@ -241,83 +248,7 @@ class GTFSImport
       service
     end
 
-    # analyze stops
-    # r_stop_data = Concurrent::dataflow do
-    #   puts "Analyzing #{stops_item[:name]}"
-    #   analysis = connection.feature.analyze(file: File.open(stops_item[:path]), filetype: "csv")
-    #   stops = CSV::parse(File.read(stops_item[:path]))
-    #   stops_header = stops.shift
-
-    #   puts "Generating stop features"
-    #   r_stops = stops.each_slice(999).to_a.map do |slice|
-    #     Concurrent::Future.execute do
-    #       csv_data = ([stops_header] + slice)
-    #       text = CSV::generate{|x| csv_data.each{|y| x << y}}
-    #       params = {
-    #         filetype: "csv",
-    #         text: text,
-    #         publishParameters: analysis["publishParameters"].merge(
-    #           PUBLISH_STEP_ACTIONS[stops_item[:file_name]]
-    #         )
-    #       }
-
-    #       connection.run(path: '/content/features/generate', method: 'POST', body: params)
-    #     end
-    #   end
-
-    #   # since we have chunks of 1000, we're going to have to manually construct
-    #   # a composite (there really has to be a better way...)
-      
-    #   base_output = {
-    #     "extent" => {"xmin" => Float::INFINITY, "xmax" => -Float::INFINITY,
-    #                  "ymin" => Float::INFINITY, "ymax" => -Float::INFINITY},
-    #     "features" => []
-    #   }
-
-    #   r_stops.reduce(base_output) do |memo,r_slice|
-    #     slice = r_slice.value
-
-    #     s_extent = slice["featureCollection"]["layers"].first["layerDefinition"]["extent"]
-    #     s_features = slice["featureCollection"]["layers"].first["featureSet"]["features"]
-    #     {
-    #       "extent" => {
-    #         "xmin" => [memo["extent"]["xmin"], s_extent["xmin"]].min,
-    #         "ymin" => [memo["extent"]["ymin"], s_extent["ymin"]].min,
-    #         "xmax" => [memo["extent"]["xmax"], s_extent["xmax"]].max,
-    #         "ymax" => [memo["extent"]["ymax"], s_extent["ymax"]].max
-    #       },
-    #       "features" => memo["features"] + s_features
-    #     }
-    #   end
-    # end
-
-    # add stops to the service
-    # r_stops = Concurrent::dataflow(r_service) do |service|
     stops = begin
-      # extract useful info from raw stop data
-      # stops = stop_data["features"].map do |stop|
-      #   { geometry: stop["geometry"],
-      #     attributes: {
-      #       stop_name: stop["attributes"]["stop_name"],
-      #       stop_lat: stop["attributes"]["stop_lat"],
-      #       stop_lon: stop["attributes"]["stop_lon"],
-      #       "FID": stop["attributes"]["FID"]
-      #   }}
-      # end
-
-      # pad out the extent a little
-      # extent = stop_data["extent"]
-      # padding = 0.4
-      # x_delta = extent["xmax"] - extent["xmin"]
-      # y_delta = extent["ymax"] - extent["ymin"]
-      # extent = extent.merge({
-      #   "xmax" => extent["xmax"] + padding*x_delta,
-      #   "xmin" => extent["xmin"] - padding*x_delta,
-      #   "ymax" => extent["ymax"] + padding*y_delta,
-      #   "ymin" => extent["ymin"] - padding*y_delta
-      # })
-      # layers_temp["addToDefinition"]["layers"].first["extent"] = extent
-
       stops_csv = CSV::parse(File.read(stops_item[:path]))
       stops_header = stops_csv.shift
 
@@ -393,7 +324,6 @@ class GTFSImport
       end
       translated = translate_coordinates(coordinates, connection)
 
-      puts "zipping"
       shape_groups = shapes_csv.
         zip(translated).
         reduce({}){|memo,(s,coordinates)|

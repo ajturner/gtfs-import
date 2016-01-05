@@ -14,7 +14,7 @@
       "allowOthersToUpdate":"true",
       "allowOthersToDelete":"true"
     },
-    "spatialReference":{ "wkid":4326 },
+    "spatialReference":{"wkid": 4326},
     "xssPreventionInfo":{
       "xssPreventionEnabled":"true",
       "xssPreventionRule":"InputOnly",
@@ -23,6 +23,6 @@
     "tables":[
 
     ],
-    "name":"FS_Create"
+    "name":"{{service_name}}"
   }
 }
