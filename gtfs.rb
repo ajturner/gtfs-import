@@ -54,14 +54,12 @@ class GTFSImport
 
   PUBLISH_STEP_ACTIONS = {
     "stops.txt" => {
-      "name" => "Stops",
       "locationType" => "coordinates",
       "latitudeFieldName" => "stop_lat",
       "longitudeFieldName" => "stop_lon"
     },
 
     "shapes.txt" => {
-      "name" => "Shapes",
       "locationType" => "coordinates",
       "latitudeFieldName" => "shape_pt_lat",
       "longitudeFieldName" => "shape_pt_lon"
@@ -78,7 +76,6 @@ class GTFSImport
     dir = Dir.mktmpdir
 
     begin
-      # binding.pry
       files = extract_files(zip_file: config["file"], dir: dir)
 
       valid = (REQUIRED_FILES - files.map{|f| f[:file_name]}).empty?
@@ -121,8 +118,7 @@ class GTFSImport
       args = {
         connection: connection,
         files: files,
-        group_id: group_id,
-        service_name: config["service_name"]
+        group_id: group_id
       }
       requests += create_service(args)
 
@@ -143,8 +139,6 @@ class GTFSImport
           errors << r.reason
         end
       end
-
-      # binding.pry
 
       if errors.empty?
         puts "Everything has been imported successfully. Yay!"
@@ -178,9 +172,13 @@ class GTFSImport
   end
 
 
-  def self.create_service(connection:, files:, group_id:, service_name:)
+  def self.create_service(connection:, files:, group_id:)
     stops_item = files.detect{|f| f[:name] == 'Stops'}
     shapes_item = files.detect{|f| f[:name] == 'Shapes'}
+    agency_item = files.detect{|f| f[:name] == 'Agency'}
+
+    agency_csv = CSV::parse(File.read(agency_item[:path]), headers: true)
+    agency_name = agency_csv.first["agency_name"]
 
     # create a service
     # r_service = Concurrent::dataflow do
@@ -188,7 +186,7 @@ class GTFSImport
       puts "Creating feature service"
       service_tmpl = File.read("#{File.dirname(__FILE__)}/service_template.json")
       service_json_str = service_tmpl.
-        gsub('{{service_name}}', service_name)
+        gsub('{{agency_name}}', agency_name)
       service_json = JSON.parse(service_json_str)
 
       service = connection.user.create_service(service_json)
@@ -268,9 +266,8 @@ class GTFSImport
           params = {
             filetype: "csv",
             text: text,
-            publishParameters: analysis["publishParameters"].merge(
-              PUBLISH_STEP_ACTIONS[stops_item[:file_name]]
-            )
+            publishParameters: analysis["publishParameters"].
+              merge(PUBLISH_STEP_ACTIONS[stops_item[:file_name]])
           }
 
           connection.run(path: '/content/features/generate', method: 'POST', body: params)
@@ -349,7 +346,6 @@ class GTFSImport
           }
         }
       end
-      # binding.pry
 
       puts "Adding routes feature"
       fs_conn.run(path: add_features_path, method: "POST", body: {features: features})

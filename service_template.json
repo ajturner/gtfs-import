@@ -4,7 +4,6 @@
     "maxRecordCount":20000,
     "supportedQueryFormats":"JSON",
     "capabilities":"Query,Editing,Create,Update,Delete",
-    "description":"",
     "allowGeometryUpdates":"true",
     "units":"esriDecimalDegrees",
     "syncEnabled":"false",
@@ -23,6 +22,11 @@
     "tables":[
 
     ],
-    "name":"{{service_name}}"
+
+    "name":"{{agency_name}} Routes and Stops",
+    "description":"This layer, created from {{agency_name}} GTFS data, displays the routes and stops for {{agency_name}}. The colors of the routes are determined by the HEX values specified in the GTFS files. The popups indicate the name of the transit stop and route. There are numerous analysis options for you to run on this feature service. For example, you can use Data Enrichment to determine the number of households below poverty or the number of businesses within a certain walk or drive time to each stop.",
+    "thumbnail": "http://i.imgur.com/HSq6JJX.png",
+    "title": "{{agency_name}} Routes and Stops",
+    "tags": ["{{agency_name}}", "transit", "transportation", "routes", "stops", "subway", "metro", "bus", "GTFS", "public transit", "public transport", "public transportation"]
   }
 }
