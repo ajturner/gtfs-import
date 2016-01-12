@@ -1,3 +1,4 @@
+# /usr/bin/env ruby
 #
 # GTFS IMPORTER
 #
@@ -28,7 +29,54 @@ require 'concurrent'
 require 'arcgis-ruby'
 require 'pry'
 require 'csv'
+require 'optparse'
 
+config = YAML.load(File.read("#{File.dirname(__FILE__)}/config.yml"))
+Options = Struct.new(:name)
+
+class Parser
+  def self.parse(options)
+    args = Hash.new()
+
+    opt_parser = OptionParser.new do |opts|
+      opts.banner = "Usage: gtfs.rb [options]"
+
+      opts.on("-u USERNAME", "--username=USERNAME", "ArcGIS Username") do |n|
+        args["username"] = n
+      end
+
+      opts.on("-p PASSWORD", "--password=PASSWORD", "ArcGIS Password") do |n|
+        args["password"] = n
+      end
+
+      opts.on("-f FILENAME", "--file=FILENAME", "Path to GTFS Zipfile") do |n|
+        args["file"] = n
+      end
+
+      opts.on("-n NAME", "--name=NAME", "Name of the Service") do |n|
+        args["service_name"] = n
+      end
+
+      opts.on("-g GROUPID", "--group=GROUPID", "ArcGIS Group to save GTFS services. Blank for new group") do |n|
+        args["group_id"] = n
+      end
+
+      opts.on("-d ARCGISURL", "--domain=ARCGISURL", "URL to the ArcGIS Portal. Default http://arcgis.com") do |n|
+        args["host"] = n
+      end
+
+      opts.on("-h", "--help", "Prints this help") do
+        puts opts
+        exit
+      end
+    end
+
+    opt_parser.parse!(options)
+    return args
+  end
+end
+options = Parser.parse ARGV #%w[--help]
+config.merge!(options)
 
 class GTFSImport
   # Define the list of files that comprise a GTFS zip
@@ -37,11 +85,11 @@ class GTFSImport
     "stops.txt",
     "routes.txt",
     "trips.txt",
-    "stop_times.txt",
-    "calendar.txt"
+    "stop_times.txt"
   ]
 
   OPTIONAL_FILES = [
+    "calendar.txt",
     "calendar_dates.txt",
     "fare_attributes.txt",
     "fare_rules.txt",
@@ -78,14 +126,14 @@ class GTFSImport
     begin
       files = extract_files(zip_file: config["file"], dir: dir)
 
-      valid = (REQUIRED_FILES - files.map{|f| f[:file_name]}).empty?
-      raise "Invalid GTFS format. No files were uploaded." unless valid
+      missing_files = REQUIRED_FILES - files.map{|f| f[:file_name]}
+      valid = missing_files.empty?
+      raise "Invalid GTFS format. No files were uploaded. (missing #{missing_files.join(',')})" unless valid
 
       # Strip out nonstandard files
       files = files.select{|f| (REQUIRED_FILES + OPTIONAL_FILES).include?(f[:file_name])}
 
       # Begin making the appropriate API calls
-      # TODO: pull this from config!
       connection = Arcgis::Connection.new(
         host: config["host"],
         username: config["username"],
@@ -118,7 +166,8 @@ class GTFSImport
       args = {
         connection: connection,
         files: files,
-        group_id: group_id
+        group_id: group_id,
+        config: config
       }
       requests += create_service(args)
 
@@ -172,23 +221,22 @@ class GTFSImport
   end
 
 
-  def self.create_service(connection:, files:, group_id:)
+  def self.create_service(connection:, files:, group_id:, config:)
     stops_item = files.detect{|f| f[:name] == 'Stops'}
     shapes_item = files.detect{|f| f[:name] == 'Shapes'}
     agency_item = files.detect{|f| f[:name] == 'Agency'}
 
     agency_csv = CSV::parse(File.read(agency_item[:path]), headers: true)
-    agency_name = agency_csv.first["agency_name"]
+    agency_name = config['service_name'].to_s.empty? ? agency_csv.first["agency_name"] : config['service_name']
 
     # create a service
     # r_service = Concurrent::dataflow do
     service = begin
-      puts "Creating feature service"
       service_tmpl = File.read("#{File.dirname(__FILE__)}/service_template.json")
-      service_json_str = service_tmpl.
-        gsub('{{agency_name}}', agency_name)
+      service_json_str = service_tmpl.gsub('{{agency_name}}', agency_name)
       service_json = JSON.parse(service_json_str)
 
+      puts "Creating feature service: #{agency_name}"
       service = connection.user.create_service(service_json)
 
       # AGOL chrome
@@ -240,7 +288,7 @@ class GTFSImport
         layers << shapes_json
       end
 
-      layers_temp = {"addToDefinition": {"layers": layers}}
+      layers_temp = {addToDefinition: {layers: layers}}
       fs_admin_conn.run(path: add_layer_path, method: "POST", body: layers_temp)
 
       service
@@ -284,7 +332,7 @@ class GTFSImport
               stop_name: stop["attributes"]["stop_name"],
               stop_lat: stop["attributes"]["stop_lat"],
               stop_lon: stop["attributes"]["stop_lon"],
-              "FID": stop["attributes"]["FID"]
+              'FID' => stop["attributes"]["FID"]
           }}
         end
 
@@ -337,12 +385,12 @@ class GTFSImport
       puts "generating features"
       features = shape_groups.values.map do |group|
         sample = group.first
-        { attributes: {shape_id: sample["shape_id"], "FID": sample["shape_id"]},
+        { attributes: {shape_id: sample["shape_id"], "FID" => sample["shape_id"]},
           geometry: {
             paths: [ group.
               sort{|a,b| a["sequence"] <=> b["sequence"]}.
               map{|g| g["coordinates"]}],
-            spatialReference: {"wkid": 102100, "latestWkid": 3857}
+            spatialReference: {wkid: 102100, latestWkid: 3857}
           }
         }
       end
@@ -370,7 +418,8 @@ class GTFSImport
     to_dec = ->(x){ [x[0..1].to_i(16), x[2..3].to_i(16), x[4..5].to_i(16), 255] }
 
     route_colors = routes_csv.reduce({}) do |memo,route|
-      memo.merge({route["route_id"] => to_dec[route["route_color"]]})
+      color = route["route_color"].to_s.empty? ? "888888" : route["route_color"] # Grey if not defined
+      memo.merge({route["route_id"] => to_dec[color]})
     end
 
     trips_csv.reduce({}) do |memo,trip|
@@ -436,5 +485,4 @@ class GTFSImport
 
 end
 
-config = YAML.load(File.read("#{File.dirname(__FILE__)}/config.yml"))
 GTFSImport.import(config)
